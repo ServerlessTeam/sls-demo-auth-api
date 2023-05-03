@@ -1,0 +1,87 @@
+service: sls-demo-auth-api
+useDotenv: true
+
+plugins:
+  - serverless-esbuild
+
+package:
+  individually: true
+
+custom:
+  serviceName: ${self:service}-${self:provider.stage}
+  esbuild:
+    bundle: true
+    minify: true
+    packager: pnpm
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  timeout: 30
+  memorySize: 256
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: 'dynamodb:*'
+          Resource: !GetAtt 'DataTable.Arn'
+  environment:
+    JWT_SECRET: ${env:JWT_SECRET}
+    JWT_ACCESS_TOKEN_TTL: ${env:JWT_ACCESS_TOKEN_TTL}
+    JWT_REFRESH_TOKEN_TTL: ${env:JWT_REFRESH_TOKEN_TTL}
+    DATA_TABLE: !Ref 'DataTable'
+
+functions:
+  ApiAuthorizer:
+    handler: src/handlers/authorizer/index.main
+
+  Login:
+    handler: src/handlers/login/index.main
+    events:
+      - http:
+          path: /auth/sign-in
+          method: post
+          cors: true
+
+  Register:
+    handler: src/handlers/register/index.main
+    events:
+      - http:
+          path: /auth/sign-up
+          method: post
+          cors: true
+
+  GetCurrentUser:
+    handler: src/handlers/current-user/index.main
+    events:
+      - http:
+          path: /me
+          method: get
+          cors: true
+          authorizer: 
+            name: ApiAuthorizer
+            resultTtlInSeconds: 0
+            type: token
+
+resources:
+  Resources:
+    DataTable: 
+      Type: AWS::DynamoDB::Table
+      Properties: 
+        AttributeDefinitions: 
+          - AttributeName: pk
+            AttributeType: S
+          - AttributeName: sk
+            AttributeType: S
+        KeySchema: 
+          - AttributeName: pk
+            KeyType: HASH
+          - AttributeName: sk
+            KeyType: RANGE
+        TimeToLiveSpecification:
+          AttributeName: deleteAt
+          Enabled: true
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:custom.serviceName}-data
